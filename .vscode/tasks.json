@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Backend: Run development server",
+			"type": "shell",
+			"command": "cd /Users/bhumikagupta/ai_pr_reviewer/backend && /Users/bhumikagupta/ai_pr_reviewer/.venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+			"isBackground": true
+		},
+		{
+			"label": "Frontend: Run development server",
+			"type": "shell",
+			"command": "cd /Users/bhumikagupta/ai_pr_reviewer/frontend && npm run dev",
+			"isBackground": true
+		}
+	]
+}

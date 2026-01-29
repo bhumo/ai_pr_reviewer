@@ -1,0 +1,22 @@
+name: AI PR Reviewer
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send PR to reviewer service
+        env:
+          REVIEWER_URL: ${{ secrets.REVIEWER_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sS -X POST "$REVIEWER_URL/review/github" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "repo_full_name": "'"${{ github.repository }}"'",
+              "pr_number": '"${{ github.event.pull_request.number }}"',
+              "access_token": "'"${GITHUB_TOKEN}"'"
+            }'
