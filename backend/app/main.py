@@ -1,10 +1,15 @@
-import hmac
 import hashlib
-from typing import List
-from fastapi import FastAPI, Header, HTTPException
+import hmac
+from collections import deque
+from datetime import datetime
+from typing import Deque, List
+from uuid import uuid4
+
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.config import settings
-from app.models import PRInfo, ReviewResponse
+from app.models import GitHubReviewRequest, PRInfo, ReviewRecord, ReviewResponse
 from app.services.reviewer import analyze_pr
 from app.services.github import fetch_pr
 
@@ -18,42 +23,61 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-REVIEWS: List[ReviewResponse] = []
+REVIEWS: Deque[ReviewRecord] = deque(maxlen=settings.review_history_size)
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "openai_configured": bool(settings.openai_api_key),
+        "model": settings.openai_model,
+    }
+
+
+def _store_review(pr: PRInfo, review: ReviewResponse, source: str) -> None:
+    REVIEWS.appendleft(
+        ReviewRecord(
+            id=str(uuid4()),
+            pr=pr,
+            review=review,
+            source=source,
+            created_at=datetime.utcnow(),
+        )
+    )
 
 
 @app.post("/review", response_model=ReviewResponse)
 def review_pr(pr: PRInfo) -> ReviewResponse:
     review = analyze_pr(pr)
-    REVIEWS.insert(0, review)
+    _store_review(pr, review, source="direct")
     return review
 
 
 @app.post("/review/github", response_model=ReviewResponse)
-def review_pr_from_github(
-    repo_full_name: str,
-    pr_number: int,
-    access_token: str,
-) -> ReviewResponse:
-    pr = fetch_pr(access_token, repo_full_name, pr_number)
+def review_pr_from_github(request: GitHubReviewRequest) -> ReviewResponse:
+    try:
+        pr = fetch_pr(request.access_token, request.repo_full_name, request.pr_number)
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=400, detail=f"Failed to fetch PR: {exc}") from exc
+
     review = analyze_pr(pr)
-    REVIEWS.insert(0, review)
+    _store_review(pr, review, source="github")
     return review
 
 
-@app.get("/reviews", response_model=List[ReviewResponse])
-def list_reviews() -> List[ReviewResponse]:
-    return REVIEWS
+@app.get("/reviews", response_model=List[ReviewRecord])
+def list_reviews() -> List[ReviewRecord]:
+    return list(REVIEWS)
 
 
 def verify_signature(payload: bytes, signature: str) -> bool:
     if not settings.github_webhook_secret:
         return False
-    sha_name, signature = signature.split("=")
+    try:
+        sha_name, signature = signature.split("=", 1)
+    except ValueError:
+        return False
     if sha_name != "sha256":
         return False
     mac = hmac.new(
@@ -63,15 +87,20 @@ def verify_signature(payload: bytes, signature: str) -> bool:
 
 
 @app.post("/webhook")
-def webhook(
-    payload: dict,
+async def webhook(
+    request: Request,
     x_hub_signature_256: str = Header(default=""),
     x_github_event: str = Header(default=""),
 ) -> dict:
-    raw = str(payload).encode()
+    raw_body = await request.body()
     if settings.github_webhook_secret:
-        if not x_hub_signature_256 or not verify_signature(raw, x_hub_signature_256):
+        if not x_hub_signature_256 or not verify_signature(raw_body, x_hub_signature_256):
             raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
 
     if x_github_event == "pull_request":
         action = payload.get("action")
@@ -88,5 +117,5 @@ def webhook(
                 url=pr.get("html_url"),
             )
             review = analyze_pr(pr_info)
-            REVIEWS.insert(0, review)
+            _store_review(pr_info, review, source="webhook")
     return {"ok": True}

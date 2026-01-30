@@ -45,6 +45,7 @@ An automated pull request review assistant powered by LangChain and OpenAI GPT-4
 - **Dashboard**: Modern Next.js frontend with Tailwind CSS
 - **GitHub Actions**: Integrated workflow that triggers reviews automatically
 - **REST API**: FastAPI backend with full CORS support
+- **Guardrails**: LLM-safe prompts, size limits, signature verification, and stubbed reviews when keys are missing
 
 ## Prerequisites
 
@@ -153,6 +154,12 @@ GITHUB_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----\n...
 GITHUB_WEBHOOK_SECRET=your-secret
 BASE_URL=http://localhost:8000
 FRONTEND_URL=http://localhost:3000
+OPENAI_MODEL=gpt-4o-mini
+REVIEW_HISTORY_SIZE=50
+MAX_REVIEW_FILES=20
+MAX_PATCH_CHARS=20000
+LLM_TIMEOUT_SECONDS=30
+ALLOW_STUB_REVIEWS=true
 ```
 
 ## Testing
